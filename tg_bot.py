@@ -2,14 +2,14 @@ import os
 import logging
 import time
 from redis_db import RedisDB
-from telegram import ReplyKeyboardMarkup
+from telegram import ReplyKeyboardMarkup, ParseMode
 from telegram.ext import Updater, MessageHandler, Filters, CommandHandler, ConversationHandler, RegexHandler
 from logger_bot import BotLogsHandler
 from dotenv import load_dotenv
 from quiz_data import get_quiz_data
 
 bot_logger_telegram = logging.getLogger("bot_logger_telegram")
-NEW_QUESTION, USER_ANSWER = range(2)
+NEW_QUESTION, USER_ANSWER, SURRENDR = range(3)
 
 
 class QuizBot():
@@ -24,10 +24,14 @@ class QuizBot():
         conv_handler = ConversationHandler(
             entry_points=[CommandHandler('start', self.greet_user)],
             states={
-                NEW_QUESTION: [MessageHandler(Filters.regex('Новый вопрос'), self.handle_new_question_request)],
-                USER_ANSWER: [MessageHandler(Filters.text, self.handle_solution_attempt)],
+                NEW_QUESTION: [MessageHandler(Filters.regex('Новый вопрос'), self.handle_new_question_request),
+                               MessageHandler(Filters.regex('Сдаться'), self.surrender)],
+
+                USER_ANSWER: [MessageHandler(Filters.regex('Новый вопрос'), self.handle_new_question_request),
+                              MessageHandler(Filters.regex('Сдаться'), self.surrender),
+                              MessageHandler(Filters.text, self.handle_solution_attempt)],
             },
-            fallbacks=[MessageHandler(Filters.regex('Сдаться'), self.surrender)],
+            fallbacks=[],
         )
 
 
@@ -51,9 +55,9 @@ class QuizBot():
     def surrender(self, update, context):
         try:
             answer = self.get_answer(update)
-            update.message.reply_text(f'Правильный ответ: {answer}. Перейдем к следующему вопросу!',
-                                      reply_markup=ReplyKeyboardMarkup(self.key_board, one_time_keyboard=True))
-            self.handle_new_question_request()
+            update.message.reply_text(f'Правильный ответ: <b>{answer}</b>. Перейдем к следующему вопросу!',
+                                      reply_markup=ReplyKeyboardMarkup(self.key_board, one_time_keyboard=True), parse_mode=ParseMode.HTML)
+            self.handle_new_question_request(update, context)
         except KeyError:
             update.message.reply_text(f'Сначала нужно начать квиз! Нажми кнопку Новый вопрос. Еще рано сдаваться!',
                                       reply_markup=ReplyKeyboardMarkup(self.key_board, one_time_keyboard=True))
@@ -61,6 +65,7 @@ class QuizBot():
     def handle_solution_attempt(self, update, context):
             answer = self.get_answer(update)
             user_answer = update.message.text.lower().replace('.', '')
+
             if user_answer == answer:
                 update.message.reply_text('Ответ правильный! Переходи дальше.',
                                           reply_markup=ReplyKeyboardMarkup(self.key_board, one_time_keyboard=True))
@@ -68,9 +73,11 @@ class QuizBot():
             else:
                 update.message.reply_text('Попробуй еще раз!',
                                           reply_markup=ReplyKeyboardMarkup(self.key_board, one_time_keyboard=True))
+                return USER_ANSWER
 
     def get_answer(self, update):
         return self.quiz_data[self.question_number][self.redis_db.get_data(update.message.chat_id)]
+
 if __name__ == '__main__':
     load_dotenv(dotenv_path='.env')
     logging.basicConfig(format="%(levelname)s %(message)s")
