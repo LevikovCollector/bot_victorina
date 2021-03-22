@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from quiz_data import get_quiz_data
 
 bot_logger_telegram = logging.getLogger("bot_logger_telegram")
-NEW_QUESTION, USER_ANSWER, SURRENDR = range(3)
+NEW_QUESTION, USER_ANSWER = range(2)
 
 
 class QuizBot():
@@ -20,15 +20,21 @@ class QuizBot():
         self.question_number = -1
         self.quiz_data = get_quiz_data()
         self.redis_db = RedisDB()
+        self.right_answers = 0
+        self.missed_questions = 0
+        self.user_not_answer_question = True
+
         dispacher = updater.dispatcher
         conv_handler = ConversationHandler(
             entry_points=[CommandHandler('start', self.greet_user)],
             states={
                 NEW_QUESTION: [MessageHandler(Filters.regex('Новый вопрос'), self.handle_new_question_request),
-                               MessageHandler(Filters.regex('Сдаться'), self.surrender)],
+                               MessageHandler(Filters.regex('Сдаться'), self.surrender),
+                               MessageHandler(Filters.regex('Мой счет'), self.get_my_bill)],
 
                 USER_ANSWER: [MessageHandler(Filters.regex('Новый вопрос'), self.handle_new_question_request),
                               MessageHandler(Filters.regex('Сдаться'), self.surrender),
+                              MessageHandler(Filters.regex('Мой счет'), self.get_my_bill),
                               MessageHandler(Filters.text, self.handle_solution_attempt)],
             },
             fallbacks=[],
@@ -44,12 +50,23 @@ class QuizBot():
         update.message.reply_text('Здравствуйте!', reply_markup=ReplyKeyboardMarkup(self.key_board, one_time_keyboard=True))
         return NEW_QUESTION
 
+    def get_my_bill(self, update, context):
+        all_questions = len(self.quiz_data)
+        update.message.reply_text(f'Всего вопросов: {all_questions};\n'
+                                  f'Правильных ответов: {self.right_answers};\n'
+                                  f'Вопросов пропущено: {self.missed_questions}.',
+                                  reply_markup=ReplyKeyboardMarkup(self.key_board, one_time_keyboard=True))
+
     def handle_new_question_request(self, update, context):
+        if self.user_not_answer_question and self.question_number >=0:
+            self.missed_questions += 1
         self.question_number += 1
         question = list(self.quiz_data[self.question_number].keys())[0]
         self.redis_db.save_data(name=update.message.chat_id, value=question)
         update.message.reply_text(question,
                                   reply_markup=ReplyKeyboardMarkup(self.key_board, one_time_keyboard=True))
+        self.user_not_answer_question = True
+
         return  USER_ANSWER
 
     def surrender(self, update, context):
@@ -67,6 +84,8 @@ class QuizBot():
             user_answer = update.message.text.lower().replace('.', '')
 
             if user_answer == answer:
+                self.right_answers += 1
+                self.user_not_answer_question = False
                 update.message.reply_text('Ответ правильный! Переходи дальше.',
                                           reply_markup=ReplyKeyboardMarkup(self.key_board, one_time_keyboard=True))
                 return NEW_QUESTION
@@ -94,5 +113,3 @@ if __name__ == '__main__':
         except Exception as error:
             bot_logger_telegram.error(f'В работе бота возникла ошибка:\n{error}', exc_info=True)
             time.sleep(60)
-
-            #ПерерЕзал пуповину
