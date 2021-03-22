@@ -35,4 +35,4 @@ python vk_bot.py - запускает вк бота
 ```
 
 ## Пример работы
-![](https://github.com/LevikovCollector/bot_messages/blob/master/gif_for_github/chat_bot.gif)
+![](https://github.com/LevikovCollector/bot_victorina/blob/main/img_for_git/1.png)
