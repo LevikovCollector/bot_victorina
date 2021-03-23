@@ -4,10 +4,10 @@ import os
 
 class BotLogsHandler(logging.Handler):
 
-    def __init__(self):
-        logging.Handler.__init__(self)
-        self.bot =  telegram.Bot(token=os.environ['TELEGRAMM_LOGGER_BOT'])
-        self.chat_id = os.environ["TELEGRAM_CHAT_ID"]
+    def __init__(self, token, chat_id):
+        super().__init__()
+        self.bot =  telegram.Bot(token=token)
+        self.chat_id = chat_id
 
     def emit(self, record):
         log_entry = self.format(record)

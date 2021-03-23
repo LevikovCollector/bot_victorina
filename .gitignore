@@ -8,6 +8,7 @@ __pycache__/
 
 # Distribution / packaging
 quiz-questions/
+.idea/
 .Python
 build/
 develop-eggs/

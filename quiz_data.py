@@ -28,6 +28,11 @@ def get_quiz_data():
     return data_quiz
 
 
+def get_answer(quiz_data, question_number, redis_db, redis_db_key):
+    return quiz_data[question_number][redis_db.get_data(redis_db_key)]
+
+
+
 
 
 
