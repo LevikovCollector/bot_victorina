@@ -53,13 +53,3 @@ class RedisDB:
 
     def save_vk_user_state_ready(self, key, value):
         self.save_data(name=f'{key}-user_state_ready', value=value)
-
-if __name__ == '__main__':
-    load_dotenv(dotenv_path='.env')
-    user_key = 'vk-7224598'
-    redis_db = RedisDB()
-    redis_db.save_right_answers(user_key, 0)
-    redis_db.save_missed_questions(user_key, 0)
-    redis_db.save_question_number(user_key, -1)
-    redis_db.save_user_not_answer_question_state(user_key, 1)
-    redis_db.save_vk_user_state_ready(user_key, 1)
