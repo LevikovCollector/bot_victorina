@@ -4,6 +4,7 @@ import time
 import random
 import json
 
+from textwrap import dedent
 from dotenv import load_dotenv
 from telegram import ReplyKeyboardMarkup, ParseMode
 from telegram.ext import Updater, MessageHandler, Filters, CommandHandler, ConversationHandler
@@ -50,7 +51,7 @@ class QuizBot():
         user_struct = {
                        'question': '',
                        'answer': '',
-                       'score': {'right_answers':0, 'missed_questions': 0},
+                       'right_answers':0,
                        'completed_questions': []
                        }
         self.redis_db.set_value(user_key, 'info', json.dumps(user_struct))
@@ -63,11 +64,8 @@ class QuizBot():
     def get_my_score(self, update, context):
         user_key = f'tg-{update.message.chat_id}'
         user_info = json.loads(self.redis_db.get_value(user_key, 'info'))
-        all_questions = len(self.quiz_data)
-        text = f'''Всего вопросов: {all_questions};
-                    Правильных ответов: {user_info['score']['right_answers']};
-                    Вопросов пропущено: {user_info['score']['missed_questions']}.'''
-        update.message.reply_text(text.replace('    ', ''),
+        text = f'Правильных ответов: {user_info["right_answers"]}'
+        update.message.reply_text(dedent(text),
                                   reply_markup=ReplyKeyboardMarkup(self.key_board, one_time_keyboard=True))
 
     def get_question_and_answer(self, user_struct):
@@ -104,7 +102,6 @@ class QuizBot():
             question, answer = self.get_question_and_answer(user_info)
             user_info['question'] = question
             user_info['answer'] = answer
-            user_info['score']['missed_questions'] = user_info['score']['missed_questions'] + 1
 
             self.redis_db.set_value(user_key, 'info', json.dumps(user_info))
 
@@ -122,7 +119,7 @@ class QuizBot():
         user_answer = update.message.text.lower().replace('.', '')
 
         if user_answer == user_info['answer']:
-            user_info['score']['right_answers'] = user_info['score']['right_answers'] + 1
+            user_info['right_answers'] = user_info['right_answers'] + 1
             self.redis_db.set_value(user_key, 'info', json.dumps(user_info))
             update.message.reply_text('Ответ правильный! Переходи дальше.',
                                       reply_markup=ReplyKeyboardMarkup(self.key_board, one_time_keyboard=True))
