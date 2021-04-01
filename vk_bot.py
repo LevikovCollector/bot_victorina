@@ -1,15 +1,18 @@
-from vk_api import VkApi
-from vk_api.utils import get_random_id
+import logging
 import os
+import time
+import json
+import random
+
+from dotenv import load_dotenv
+from vk_api import VkApi
 from vk_api.keyboard import VkKeyboard
 from vk_api.longpoll import VkLongPoll, VkEventType
-from dotenv import load_dotenv
-import logging
-import time
+from vk_api.utils import get_random_id
+
 from logger_bot import BotLogsHandler
-from google.api_core.exceptions import InvalidArgument
+from quiz_data import get_quiz_data
 from redis_db import RedisDB
-from quiz_data import get_quiz_data, get_answer
 
 bot_logger_vk = logging.getLogger("bot_logger_vk")
 
@@ -32,20 +35,13 @@ class VK_Bot():
 
     def new_question(self, event):
         user_key = f'vk-{event.user_id}'
-        if self.redis_db.get_vk_user_state_ready(user_key):
-            user_not_answer_question_state = self.redis_db.get_user_not_answer_question_state(user_key)
-            question_number = self.redis_db.get_question_number(user_key)
+        user_info = json.loads(self.redis_db.get_value(user_key, 'info'))
+        if user_info['vk_user_state_ready']:
+            question, answer = self.get_question_and_answer(user_info)
+            user_info['question'] = question
+            user_info['answer'] = answer
+            self.redis_db.set_value(user_key, 'info', json.dumps(user_info))
 
-            if user_not_answer_question_state and question_number >= 0:
-                missed_questions = self.redis_db.get_missed_questions(user_key)
-                self.redis_db.save_missed_questions(user_key, missed_questions + 1)
-
-            qustion_num = question_number + 1
-            self.redis_db.save_question_number(user_key, qustion_num)
-            self.redis_db.save_user_not_answer_question_state(user_key, 1)
-
-            question = list(self.quiz_data[qustion_num].keys())[0]
-            self.redis_db.save_data(name=user_key, value=question)
             self.vk_api.messages.send(
                 user_id=event.user_id,
                 message=question,
@@ -60,14 +56,17 @@ class VK_Bot():
                 random_id=get_random_id()
             )
 
-    def i_am_ready(self, event):
+    def is_user_ready(self, event):
         user_key = f'vk-{event.user_id}'
-        self.redis_db.save_right_answers(user_key, 0)
-        self.redis_db.save_missed_questions(user_key, 0)
-        self.redis_db.save_question_number(user_key, -1)
-        self.redis_db.save_user_not_answer_question_state(user_key, 1)
-        self.redis_db.save_vk_user_state_ready(user_key, 1)
 
+        user_struct = {
+            'question': '',
+            'answer': '',
+            'score': {'right_answers': 0, 'missed_questions': 0},
+            'completed_questions': [],
+            'vk_user_state_ready': 1
+        }
+        self.redis_db.set_value(user_key, 'info', json.dumps(user_struct))
         self.vk_api.messages.send(
             user_id=event.user_id,
             message='Поехали!',
@@ -76,13 +75,14 @@ class VK_Bot():
         )
         self.new_question(event)
 
-    def get_my_bill(self, event):
+    def get_my_score(self, event):
         user_key = f'vk-{event.user_id}'
-        if self.redis_db.get_vk_user_state_ready(user_key):
+        user_info = json.loads(self.redis_db.get_value(user_key, 'info'))
+        if user_info['vk_user_state_ready']:
             all_questions = len(self.quiz_data)
             text = f'''Всего вопросов: {all_questions};
-            Правильных ответов: {self.redis_db.get_right_answers(user_key)};
-            Вопросов пропущено: {self.redis_db.get_missed_questions(user_key)}.'''
+                       Правильных ответов: {user_info['score']['right_answers']};
+                       Вопросов пропущено: {user_info['score']['missed_questions']}.'''
             self.vk_api.messages.send(
                 user_id=event.user_id,
                 message=text,
@@ -100,16 +100,31 @@ class VK_Bot():
     def surrender(self, event):
         try:
             user_key = f'vk-{event.user_id}'
-            question_number = self.redis_db.get_question_number(user_key)
-            if self.redis_db.get_vk_user_state_ready(user_key):
-                answer = get_answer(self.quiz_data, question_number, self.redis_db, user_key)
+            user_info = json.loads(self.redis_db.get_value(user_key, 'info'))
+            if user_info['vk_user_state_ready']:
+                text = f'Правильный ответ: {user_info["answer"].capitalize()}. Перейдем к следующему вопросу!'
+
                 self.vk_api.messages.send(
                     user_id=event.user_id,
-                    message=f'Правильный ответ: {answer}\n Новый вопрос:',
+                    message=text,
                     keyboard=self.keyboard.get_keyboard(),
                     random_id=get_random_id()
                 )
-                self.new_question(event)
+
+                question, answer = self.get_question_and_answer(user_info)
+                user_info['question'] = question
+                user_info['answer'] = answer
+                user_info['score']['missed_questions'] = user_info['score']['missed_questions'] + 1
+
+                self.redis_db.set_value(user_key, 'info', json.dumps(user_info))
+
+
+                self.vk_api.messages.send(
+                    user_id=event.user_id,
+                    message=question,
+                    keyboard=self.keyboard.get_keyboard(),
+                    random_id=get_random_id()
+                )
             else:
                 self.vk_api.messages.send(
                     user_id=event.user_id,
@@ -126,15 +141,15 @@ class VK_Bot():
             )
 
     def check_user_answer(self, event):
+        user_key = f'vk-{event.user_id}'
+        user_info = json.loads(self.redis_db.get_value(user_key, 'info'))
         try:
-            user_key = f'vk-{event.user_id}'
-            question_number = self.redis_db.get_question_number(user_key)
-            if self.redis_db.get_vk_user_state_ready(user_key):
-                answer = get_answer(self.quiz_data, question_number, self.redis_db, user_key)
+            if user_info['vk_user_state_ready']:
+
                 user_answer = event.text.lower().replace('.', '')
-                if user_answer == answer:
-                    self.redis_db.save_right_answers(user_key, self.redis_db.get_right_answers(user_key) + 1)
-                    self.redis_db.save_user_not_answer_question_state(user_key, 0)
+                if user_answer == user_info['answer']:
+                    user_info['score']['right_answers'] = user_info['score']['right_answers'] + 1
+                    self.redis_db.set_value(user_key, 'info', json.dumps(user_info))
                     self.vk_api.messages.send(
                         user_id=event.user_id,
                         message='Ответ правильный! Переходи дальше.',
@@ -155,12 +170,20 @@ class VK_Bot():
                     keyboard=self.keyboard.get_keyboard(),
                     random_id=get_random_id()
                 )
-        except InvalidArgument:
-            self.vk_api.messages.send(
-                user_id=event.user_id,
-                message='Введена слишком длинная строка. Длинна строки не должна превышать 256 символов.',
-                random_id=get_random_id()
-            )
+        except KeyError:
+                self.vk_api.messages.send(
+                    user_id=event.user_id,
+                    message='Сначала напиши: Я готов',
+                    keyboard=self.keyboard.get_keyboard(),
+                    random_id=get_random_id()
+                )
+
+    def get_question_and_answer(self, user_struct):
+        while True:
+            qustion_num = random.randrange(0, len(self.quiz_data))
+            if qustion_num not in user_struct['completed_questions']:
+                user_struct['completed_questions'].append(qustion_num)
+                return self.quiz_data[qustion_num].popitem()
 
 
 if __name__ == "__main__":
@@ -168,7 +191,7 @@ if __name__ == "__main__":
     logging.basicConfig(format="%(levelname)s %(message)s")
     bot_logger_vk.setLevel(logging.INFO)
     bot_logger_vk.addHandler(BotLogsHandler(os.environ['TELEGRAMM_LOGGER_BOT'], os.environ["TELEGRAM_CHAT_ID"]))
-    bot_logger_vk.info('Запущен VK бот!')
+    bot_logger_vk.info('Запущен VK бот! (квиз)')
     while True:
         try:
             vk_bot = VK_Bot(os.environ['VK_GROUP_TOKEN'])
@@ -181,12 +204,13 @@ if __name__ == "__main__":
                         vk_bot.surrender(event)
 
                     elif event.text == 'Я готов':
-                        vk_bot.i_am_ready(event)
+                        vk_bot.is_user_ready(event)
 
                     elif event.text == 'Мой счет':
-                        vk_bot.get_my_bill(event)
+                        vk_bot.get_my_score(event)
 
                     else:
+                        print(event.user_id)
                         vk_bot.check_user_answer(event)
         except ConnectionError:
             bot_logger_vk.error(f'В работе бота возникла ошибка:\n{error}', exc_info=True)

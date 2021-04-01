@@ -1,12 +1,16 @@
-import os
 import logging
+import os
 import time
-from redis_db import RedisDB
-from telegram import ReplyKeyboardMarkup, ParseMode
-from telegram.ext import Updater, MessageHandler, Filters, CommandHandler, ConversationHandler, RegexHandler
-from logger_bot import BotLogsHandler
+import random
+import json
+
 from dotenv import load_dotenv
-from quiz_data import get_quiz_data, get_answer
+from telegram import ReplyKeyboardMarkup, ParseMode
+from telegram.ext import Updater, MessageHandler, Filters, CommandHandler, ConversationHandler
+
+from logger_bot import BotLogsHandler
+from quiz_data import get_quiz_data
+from redis_db import RedisDB
 
 bot_logger_telegram = logging.getLogger("bot_logger_telegram")
 NEW_QUESTION, USER_ANSWER = range(2)
@@ -19,10 +23,6 @@ class QuizBot():
         self.key_board = [['Новый вопрос', 'Сдаться'], ['Мой счет']]
         self.quiz_data = get_quiz_data()
         self.redis_db = RedisDB()
-        # self.question_number = -1
-        # self.right_answers = 0
-        # self.missed_questions = 0
-        # self.user_not_answer_question = True
 
         dispacher = updater.dispatcher
         conv_handler = ConversationHandler(
@@ -30,11 +30,11 @@ class QuizBot():
             states={
                 NEW_QUESTION: [MessageHandler(Filters.regex('Новый вопрос'), self.handle_new_question_request),
                                MessageHandler(Filters.regex('Сдаться'), self.surrender),
-                               MessageHandler(Filters.regex('Мой счет'), self.get_my_bill)],
+                               MessageHandler(Filters.regex('Мой счет'), self.get_my_score)],
 
                 USER_ANSWER: [MessageHandler(Filters.regex('Новый вопрос'), self.handle_new_question_request),
                               MessageHandler(Filters.regex('Сдаться'), self.surrender),
-                              MessageHandler(Filters.regex('Мой счет'), self.get_my_bill),
+                              MessageHandler(Filters.regex('Мой счет'), self.get_my_score),
                               MessageHandler(Filters.text, self.handle_solution_attempt)],
             },
             fallbacks=[],
@@ -47,69 +47,83 @@ class QuizBot():
 
     def greet_user(self, update, context):
         user_key = f'tg-{update.message.chat_id}'
-        self.redis_db.save_right_answers(user_key, 0)
-        self.redis_db.save_missed_questions(user_key, 0)
-        self.redis_db.save_question_number(user_key, -1)
-        self.redis_db.save_user_not_answer_question_state(user_key, 1)
+        user_struct = {
+                       'question': '',
+                       'answer': '',
+                       'score': {'right_answers':0, 'missed_questions': 0},
+                       'completed_questions': []
+                       }
+        self.redis_db.set_value(user_key, 'info', json.dumps(user_struct))
+
 
         update.message.reply_text('Здравствуйте!',
                                   reply_markup=ReplyKeyboardMarkup(self.key_board, one_time_keyboard=True))
         return NEW_QUESTION
 
-    def get_my_bill(self, update, context):
+    def get_my_score(self, update, context):
         user_key = f'tg-{update.message.chat_id}'
+        user_info = json.loads(self.redis_db.get_value(user_key, 'info'))
         all_questions = len(self.quiz_data)
         text = f'''Всего вопросов: {all_questions};
-Правильных ответов: {self.redis_db.get_right_answers(user_key)};
-Вопросов пропущено: {self.redis_db.get_missed_questions(user_key)}.'''
-        update.message.reply_text(text,
+                    Правильных ответов: {user_info['score']['right_answers']};
+                    Вопросов пропущено: {user_info['score']['missed_questions']}.'''
+        update.message.reply_text(text.replace('    ', ''),
                                   reply_markup=ReplyKeyboardMarkup(self.key_board, one_time_keyboard=True))
 
+    def get_question_and_answer(self, user_struct):
+        while True:
+            qustion_num = random.randrange(0, len(self.quiz_data))
+            if qustion_num not in user_struct['completed_questions']:
+                user_struct['completed_questions'].append(qustion_num)
+                return self.quiz_data[qustion_num].popitem()
 
     def handle_new_question_request(self, update, context):
         user_key = f'tg-{update.message.chat_id}'
-        user_not_answer_question_state = self.redis_db.get_user_not_answer_question_state(user_key)
-        question_number = self.redis_db.get_question_number(user_key)
+        user_info = json.loads(self.redis_db.get_value(user_key, 'info'))
 
-        if user_not_answer_question_state and question_number >= 0:
-            missed_questions = self.redis_db.get_missed_questions(user_key)
-            self.redis_db.save_missed_questions(user_key, missed_questions + 1)
+        question, answer = self.get_question_and_answer(user_info)
+        user_info['question'] = question
+        user_info['answer'] = answer
+        self.redis_db.set_value(user_key, 'info', json.dumps(user_info))
 
-        qustion_num = question_number + 1
-        self.redis_db.save_question_number(user_key, qustion_num)
-
-        question = list(self.quiz_data[qustion_num].keys())[0]
-        self.redis_db.save_data(name=f'{user_key}', value=question)
         update.message.reply_text(question,
                                   reply_markup=ReplyKeyboardMarkup(self.key_board, one_time_keyboard=True))
-
-        self.redis_db.save_user_not_answer_question_state(user_key, 1)
 
         return USER_ANSWER
 
     def surrender(self, update, context):
         try:
             user_key = f'tg-{update.message.chat_id}'
-            question_number = int(self.redis_db.get_question_number(user_key))
-            answer = get_answer(self.quiz_data, question_number, self.redis_db, user_key)
-            update.message.reply_text(f'Правильный ответ: <b>{answer}</b>. Перейдем к следующему вопросу!',
+            user_info = json.loads(self.redis_db.get_value(user_key, 'info'))
+            text = f'Правильный ответ: <b>{user_info["answer"].capitalize()}</b>. Перейдем к следующему вопросу!'
+
+            update.message.reply_text(text,
                                       reply_markup=ReplyKeyboardMarkup(self.key_board, one_time_keyboard=True),
                                       parse_mode=ParseMode.HTML)
-            self.handle_new_question_request(update, context)
+
+            question, answer = self.get_question_and_answer(user_info)
+            user_info['question'] = question
+            user_info['answer'] = answer
+            user_info['score']['missed_questions'] = user_info['score']['missed_questions'] + 1
+
+            self.redis_db.set_value(user_key, 'info', json.dumps(user_info))
+
+            update.message.reply_text(question,
+                                      reply_markup=ReplyKeyboardMarkup(self.key_board, one_time_keyboard=True),
+                                      parse_mode=ParseMode.HTML)
+
         except KeyError:
             update.message.reply_text(f'Сначала нужно начать квиз! Нажми кнопку Новый вопрос. Еще рано сдаваться!',
                                       reply_markup=ReplyKeyboardMarkup(self.key_board, one_time_keyboard=True))
 
     def handle_solution_attempt(self, update, context):
         user_key = f'tg-{update.message.chat_id}'
-        question_number = int(self.redis_db.get_question_number(user_key))
-        answer = get_answer(self.quiz_data, question_number, self.redis_db, user_key)
+        user_info = json.loads(self.redis_db.get_value(user_key, 'info'))
         user_answer = update.message.text.lower().replace('.', '')
 
-        if user_answer == answer:
-            self.redis_db.save_right_answers(user_key, self.redis_db.get_right_answers(user_key) + 1)
-            self.redis_db.save_user_not_answer_question_state(user_key, 0)
-
+        if user_answer == user_info['answer']:
+            user_info['score']['right_answers'] = user_info['score']['right_answers'] + 1
+            self.redis_db.set_value(user_key, 'info', json.dumps(user_info))
             update.message.reply_text('Ответ правильный! Переходи дальше.',
                                       reply_markup=ReplyKeyboardMarkup(self.key_board, one_time_keyboard=True))
             return NEW_QUESTION
@@ -117,8 +131,6 @@ class QuizBot():
             update.message.reply_text('Попробуй еще раз!',
                                       reply_markup=ReplyKeyboardMarkup(self.key_board, one_time_keyboard=True))
             return USER_ANSWER
-
-
 
 
 if __name__ == '__main__':

@@ -1,7 +1,6 @@
 import redis
 import logging
 import os
-from dotenv import load_dotenv
 
 logger_redis = logging.getLogger("logger_redis_db")
 
@@ -24,32 +23,8 @@ class RedisDB:
         except AttributeError:
             return 0
 
-    def get_question_number(self, key):
-        return int(self.get_data(f'{key}-question_number'))
+    def get_value(self, user_id, key):
+        return self.get_data(f'{user_id}-{key}')
 
-    def get_right_answers(self, key):
-        return int(self.get_data(f'{key}-right_answers'))
-
-    def get_user_not_answer_question_state(self, key):
-        return int(self.get_data(f'{key}-user_not_answer_question_state'))
-
-    def get_missed_questions(self, key):
-        return int(self.get_data(f'{key}-missed_questions'))
-
-    def get_vk_user_state_ready(self, key):
-        return int(self.get_data(f'{key}-user_state_ready'))
-
-    def save_question_number(self, key, q_num):
-        self.save_data(name=f'{key}-question_number', value=q_num)
-
-    def save_right_answers(self, key, value):
-        self.save_data(name=f'{key}-right_answers', value=value)
-
-    def save_missed_questions(self, key, value):
-        self.save_data(name=f'{key}-missed_questions', value=value)
-
-    def save_user_not_answer_question_state(self, key, value):
-        self.save_data(name=f'{key}-user_not_answer_question_state', value=value)
-
-    def save_vk_user_state_ready(self, key, value):
-        self.save_data(name=f'{key}-user_state_ready', value=value)
+    def set_value(self, user_id, key, value):
+        self.save_data(name=f'{user_id}-{key}', value=value)
