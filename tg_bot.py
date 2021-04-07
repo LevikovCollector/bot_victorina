@@ -54,7 +54,7 @@ class QuizBot():
                        'right_answers':0,
                        'completed_questions': []
                        }
-        self.redis_db.set_value(user_key, 'info', json.dumps(user_struct))
+        self.redis_db.save_data(f'{user_key}-info', json.dumps(user_struct))
 
 
         update.message.reply_text('Здравствуйте!',
@@ -63,7 +63,7 @@ class QuizBot():
 
     def get_my_score(self, update, context):
         user_key = f'tg-{update.message.chat_id}'
-        user_info = json.loads(self.redis_db.get_value(user_key, 'info'))
+        user_info = json.loads(self.redis_db.get_data(f'{user_key}-info'))
         text = f'Правильных ответов: {user_info["right_answers"]}'
         update.message.reply_text(dedent(text),
                                   reply_markup=ReplyKeyboardMarkup(self.key_board, one_time_keyboard=True))
@@ -73,16 +73,17 @@ class QuizBot():
             qustion_num = random.randrange(0, len(self.quiz_data))
             if qustion_num not in user_struct['completed_questions']:
                 user_struct['completed_questions'].append(qustion_num)
-                return self.quiz_data[qustion_num].popitem()
+                return list(self.quiz_data[qustion_num].items())[0]
 
     def handle_new_question_request(self, update, context):
         user_key = f'tg-{update.message.chat_id}'
-        user_info = json.loads(self.redis_db.get_value(user_key, 'info'))
+        user_info = json.loads(self.redis_db.get_data(f'{user_key}-info'))
 
         question, answer = self.get_question_and_answer(user_info)
         user_info['question'] = question
         user_info['answer'] = answer
-        self.redis_db.set_value(user_key, 'info', json.dumps(user_info))
+
+        self.redis_db.save_data(f'{user_key}-info', json.dumps(user_info))
 
         update.message.reply_text(question,
                                   reply_markup=ReplyKeyboardMarkup(self.key_board, one_time_keyboard=True))
@@ -90,37 +91,34 @@ class QuizBot():
         return USER_ANSWER
 
     def surrender(self, update, context):
-        try:
-            user_key = f'tg-{update.message.chat_id}'
-            user_info = json.loads(self.redis_db.get_value(user_key, 'info'))
-            text = f'Правильный ответ: <b>{user_info["answer"].capitalize()}</b>. Перейдем к следующему вопросу!'
 
-            update.message.reply_text(text,
-                                      reply_markup=ReplyKeyboardMarkup(self.key_board, one_time_keyboard=True),
-                                      parse_mode=ParseMode.HTML)
+        user_key = f'tg-{update.message.chat_id}'
+        user_info = json.loads(self.redis_db.get_data(f'{user_key}-info'))
+        text = f'Правильный ответ: <b>{user_info["answer"].capitalize()}</b>. Перейдем к следующему вопросу!'
 
-            question, answer = self.get_question_and_answer(user_info)
-            user_info['question'] = question
-            user_info['answer'] = answer
+        update.message.reply_text(text,
+                                  reply_markup=ReplyKeyboardMarkup(self.key_board, one_time_keyboard=True),
+                                  parse_mode=ParseMode.HTML)
 
-            self.redis_db.set_value(user_key, 'info', json.dumps(user_info))
+        question, answer = self.get_question_and_answer(user_info)
+        user_info['question'] = question
+        user_info['answer'] = answer
 
-            update.message.reply_text(question,
-                                      reply_markup=ReplyKeyboardMarkup(self.key_board, one_time_keyboard=True),
-                                      parse_mode=ParseMode.HTML)
+        self.redis_db.save_data(f'{user_key}-info', json.dumps(user_info))
 
-        except KeyError:
-            update.message.reply_text(f'Сначала нужно начать квиз! Нажми кнопку Новый вопрос. Еще рано сдаваться!',
-                                      reply_markup=ReplyKeyboardMarkup(self.key_board, one_time_keyboard=True))
+        update.message.reply_text(question,
+                                  reply_markup=ReplyKeyboardMarkup(self.key_board, one_time_keyboard=True),
+                                  parse_mode=ParseMode.HTML)
+
 
     def handle_solution_attempt(self, update, context):
         user_key = f'tg-{update.message.chat_id}'
-        user_info = json.loads(self.redis_db.get_value(user_key, 'info'))
+        user_info = json.loads(self.redis_db.get_data(f'{user_key}-info'))
         user_answer = update.message.text.lower().replace('.', '')
 
         if user_answer == user_info['answer']:
             user_info['right_answers'] = user_info['right_answers'] + 1
-            self.redis_db.set_value(user_key, 'info', json.dumps(user_info))
+            self.redis_db.save_data(f'{user_key}-info', json.dumps(user_info))
             update.message.reply_text('Ответ правильный! Переходи дальше.',
                                       reply_markup=ReplyKeyboardMarkup(self.key_board, one_time_keyboard=True))
             return NEW_QUESTION

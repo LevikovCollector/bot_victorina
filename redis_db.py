@@ -22,9 +22,3 @@ class RedisDB:
             return self.redis_connection.get(param).decode('utf-8')
         except AttributeError:
             return 0
-
-    def get_value(self, user_id, key):
-        return self.get_data(f'{user_id}-{key}')
-
-    def set_value(self, user_id, key, value):
-        self.save_data(name=f'{user_id}-{key}', value=value)

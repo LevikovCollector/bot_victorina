@@ -35,12 +35,12 @@ class VK_Bot():
 
     def new_question(self, event):
         user_key = f'vk-{event.user_id}'
-        user_info = json.loads(self.redis_db.get_value(user_key, 'info'))
+        user_info = json.loads(self.redis_db.get_data(f'{user_key}-info'))
         if user_info['vk_user_state_ready']:
             question, answer = self.get_question_and_answer(user_info)
             user_info['question'] = question
             user_info['answer'] = answer
-            self.redis_db.set_value(user_key, 'info', json.dumps(user_info))
+            self.redis_db.save_data(f'{user_key}-info', json.dumps(user_info))
 
             self.vk_api.messages.send(
                 user_id=event.user_id,
@@ -56,7 +56,7 @@ class VK_Bot():
                 random_id=get_random_id()
             )
 
-    def is_user_ready(self, event):
+    def set_user_ready_status(self, event):
         user_key = f'vk-{event.user_id}'
 
         user_struct = {
@@ -66,7 +66,7 @@ class VK_Bot():
             'completed_questions': [],
             'vk_user_state_ready': 1
         }
-        self.redis_db.set_value(user_key, 'info', json.dumps(user_struct))
+        self.redis_db.save_data(f'{user_key}-info', json.dumps(user_struct))
         self.vk_api.messages.send(
             user_id=event.user_id,
             message='Поехали!',
@@ -77,7 +77,7 @@ class VK_Bot():
 
     def get_my_score(self, event):
         user_key = f'vk-{event.user_id}'
-        user_info = json.loads(self.redis_db.get_value(user_key, 'info'))
+        user_info = json.loads(self.redis_db.get_data(f'{user_key}-info'))
         if user_info['vk_user_state_ready']:
             text = f'Правильных ответов: {user_info["right_answers"]}'
             self.vk_api.messages.send(
@@ -95,57 +95,51 @@ class VK_Bot():
             )
 
     def surrender(self, event):
-        try:
-            user_key = f'vk-{event.user_id}'
-            user_info = json.loads(self.redis_db.get_value(user_key, 'info'))
-            if user_info['vk_user_state_ready']:
-                text = f'Правильный ответ: {user_info["answer"].capitalize()}. Перейдем к следующему вопросу!'
 
-                self.vk_api.messages.send(
-                    user_id=event.user_id,
-                    message=text,
-                    keyboard=self.keyboard.get_keyboard(),
-                    random_id=get_random_id()
-                )
+        user_key = f'vk-{event.user_id}'
+        user_info = json.loads(self.redis_db.get_data(f'{user_key}-info'))
+        if user_info['vk_user_state_ready']:
+            text = f'Правильный ответ: {user_info["answer"].capitalize()}. Перейдем к следующему вопросу!'
 
-                question, answer = self.get_question_and_answer(user_info)
-                user_info['question'] = question
-                user_info['answer'] = answer
-
-                self.redis_db.set_value(user_key, 'info', json.dumps(user_info))
-
-
-                self.vk_api.messages.send(
-                    user_id=event.user_id,
-                    message=question,
-                    keyboard=self.keyboard.get_keyboard(),
-                    random_id=get_random_id()
-                )
-            else:
-                self.vk_api.messages.send(
-                    user_id=event.user_id,
-                    message='Сначала напиши: Я готов',
-                    keyboard=self.keyboard.get_keyboard(),
-                    random_id=get_random_id()
-                )
-        except KeyError:
             self.vk_api.messages.send(
                 user_id=event.user_id,
-                message='Сначала нужно начать квиз! Нажми кнопку Новый вопрос. Еще рано сдаваться!',
+                message=text,
                 keyboard=self.keyboard.get_keyboard(),
                 random_id=get_random_id()
             )
 
+            question, answer = self.get_question_and_answer(user_info)
+            user_info['question'] = question
+            user_info['answer'] = answer
+
+            self.redis_db.save_data(f'{user_key}-info', json.dumps(user_info))
+
+
+            self.vk_api.messages.send(
+                user_id=event.user_id,
+                message=question,
+                keyboard=self.keyboard.get_keyboard(),
+                random_id=get_random_id()
+            )
+        else:
+            self.vk_api.messages.send(
+                user_id=event.user_id,
+                message='Сначала напиши: Я готов',
+                keyboard=self.keyboard.get_keyboard(),
+                random_id=get_random_id()
+            )
+
+
     def check_user_answer(self, event):
         user_key = f'vk-{event.user_id}'
-        user_info = json.loads(self.redis_db.get_value(user_key, 'info'))
+        user_info = json.loads(self.redis_db.get_data(f'{user_key}-info'))
         try:
             if user_info['vk_user_state_ready']:
 
                 user_answer = event.text.lower().replace('.', '')
                 if user_answer == user_info['answer']:
                     user_info['right_answers'] = user_info['right_answers'] + 1
-                    self.redis_db.set_value(user_key, 'info', json.dumps(user_info))
+                    self.redis_db.save_data(f'{user_key}-info', json.dumps(user_info))
                     self.vk_api.messages.send(
                         user_id=event.user_id,
                         message='Ответ правильный! Переходи дальше.',
@@ -200,7 +194,7 @@ if __name__ == "__main__":
                         vk_bot.surrender(event)
 
                     elif event.text == 'Я готов':
-                        vk_bot.is_user_ready(event)
+                        vk_bot.set_user_ready_status(event)
 
                     elif event.text == 'Мой счет':
                         vk_bot.get_my_score(event)
