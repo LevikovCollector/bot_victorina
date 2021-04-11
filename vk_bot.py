@@ -147,7 +147,6 @@ if __name__ == "__main__":
                         vk_bot.get_my_score(event)
 
                     else:
-                        print(event.user_id)
                         vk_bot.check_user_answer(event)
         except ConnectionError:
             bot_logger_vk.error(f'В работе бота возникла ошибка:\n{error}', exc_info=True)
