@@ -1,7 +1,7 @@
 import os
 import pathlib
 import re
-
+import random
 
 def get_quiz_data():
     files = os.listdir('quiz-questions')
@@ -28,3 +28,7 @@ def get_quiz_data():
         except IndexError:
             print(file)
     return data_quiz
+
+def get_question_and_answer(quiz_data):
+    quiz_info = random.choice(quiz_data)
+    return random.choice(list(quiz_info.items()))
